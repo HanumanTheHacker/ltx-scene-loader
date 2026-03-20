@@ -8,7 +8,7 @@ KAGGLE CELL — Install LTXSceneLoader custom node (v2)
 
 import os
 
-NODE_DIR = '/kaggle/working/ComfyUI/custom_nodes/ltx_scene_loader'
+NODE_DIR = '/kaggle/working/ComfyUI/custom_nodes/ltx_scene-loader'
 os.makedirs(NODE_DIR, exist_ok=True)
 
 node_code = '''
