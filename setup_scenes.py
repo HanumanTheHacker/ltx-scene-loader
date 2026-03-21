@@ -2,7 +2,6 @@
 Run this cell ONCE per Kaggle session before starting ComfyUI.
 Auto-detects audio and image files by scene number.
 No manual SCENE_DEFS needed — just add files to the folders.
-Short audio (<2.8s) is padded with silence to meet LTX minimum (65 frames).
 """
 
 import json
@@ -17,8 +16,7 @@ IMAGE_FOLDER  = "/kaggle/working/ComfyUI/output"
 AUDIO_FOLDER  = "/kaggle/working/ComfyUI/input/audio"
 SCENES_JSON   = "/kaggle/working/ComfyUI/input/scenes.json"
 FPS           = 24
-MIN_FRAMES    = 65    # LTX minimum stable length (~2.7s) — crashes below this
-MIN_SECONDS   = 2.8  # Pad audio shorter than this with silence
+
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -51,50 +49,12 @@ def get_audio_duration(audio_path):
 def calc_frames(duration_seconds, fps=24):
     """
     Calculate valid LTX frame count from audio duration.
-    Formula: rounded UP to nearest (8n + 1).
-    Enforces minimum of 65 frames — LTX crashes below this.
-    Valid values: 65, 73, 81, 89, 97, 105, 113, 121, 129, 137, 145, 153, 161, 169...
+    Formula: ceil(duration_seconds) x fps + 1
+    Example: 2.4s -> 3x24+1 = 73 frames
+    Example: 7.0s -> 7x24+1 = 169 frames
     """
-    raw_frames = duration_seconds * fps
-    n          = math.ceil((raw_frames - 1) / 8)
-    frames     = int(n * 8 + 1)
+    return math.ceil(duration_seconds) * fps + 1
 
-    # Enforce minimum
-    if frames < MIN_FRAMES:
-        frames = MIN_FRAMES
-
-    return frames
-
-
-def pad_audio_if_short(audio_path, min_seconds=MIN_SECONDS):
-    """
-    If audio is shorter than min_seconds, pad it with silence at the end.
-    Returns (final_path, final_duration).
-    Padded file saved alongside original as *_padded.mp3.
-    Original file is NOT deleted.
-    """
-    duration = get_audio_duration(audio_path)
-
-    if duration >= min_seconds:
-        return audio_path, duration
-
-    pad_time    = min_seconds - duration
-    base, ext   = os.path.splitext(audio_path)
-    padded_path = base + '_padded.mp3'
-
-    result = subprocess.run([
-        'ffmpeg', '-i', audio_path,
-        '-af', f'apad=pad_dur={pad_time:.3f}',
-        '-c:a', 'libmp3lame', '-qscale:a', '2',
-        padded_path, '-y'
-    ], capture_output=True, text=True)
-
-    if result.returncode == 0:
-        return padded_path, get_audio_duration(padded_path)
-    else:
-        # Padding failed — return original, calc_frames will clamp to MIN_FRAMES
-        print(f"    ⚠️  Padding failed, using original: {os.path.basename(audio_path)}")
-        return audio_path, duration
 
 
 def detect_lip_sync(audio_filename):
@@ -193,21 +153,12 @@ for scene_num in sorted(audio_map.keys()):
         image_file = f"scene_{scene_num:02d}_00001_.png"  # fallback
 
     # Get raw duration
-    raw_duration = get_audio_duration(audio_path)
 
-    # Pad if too short
-    if raw_duration < MIN_SECONDS:
-        print(f"  ⚠️  Scene {scene_num}: {raw_duration:.2f}s is too short "
-              f"(min {MIN_SECONDS}s) → padding with silence")
-        audio_path, duration = pad_audio_if_short(audio_path)
-        audio_file = os.path.basename(audio_path)
-        print(f"       Padded to {duration:.2f}s → {audio_file}")
-    else:
-        duration = raw_duration
+    duration = get_audio_duration(audio_path)
 
-    # Calculate frames (also enforces MIN_FRAMES internally)
+    # Calculate frames
     frames     = calc_frames(duration)
-    total_dur += raw_duration  # use raw for time estimate
+    total_dur += duration
 
     # Detect lip sync
     lip_sync, character = detect_lip_sync(audio_file)
