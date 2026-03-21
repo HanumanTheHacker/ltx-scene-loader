@@ -177,7 +177,7 @@ for scene_num in sorted(audio_map.keys()):
     img_status = "✅" if image_path else "⚠️ "
     lip_str    = f"💬 {character}" if lip_sync else "🔇 narrator"
     print(f"Scene {scene_num:02d}: {audio_file}")
-    print(f"  Audio:  {raw_duration:.2f}s → {frames} frames | {lip_str}")
+    print(f"  Audio:  {duration:.2f}s → {frames} frames | {lip_str}")
     print(f"  Image:  {img_status} {image_file}")
 
 # ── WRITE scenes.json ─────────────────────────────────────────────────────────
