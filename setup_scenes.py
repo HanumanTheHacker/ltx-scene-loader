@@ -2,6 +2,7 @@
 Run this cell ONCE per Kaggle session before starting ComfyUI.
 Auto-detects audio and image files by scene number.
 No manual SCENE_DEFS needed — just add files to the folders.
+Short audio (<2.8s) is padded with silence to meet LTX minimum (65 frames).
 """
 
 import json
@@ -16,6 +17,8 @@ IMAGE_FOLDER  = "/kaggle/working/ComfyUI/output"
 AUDIO_FOLDER  = "/kaggle/working/ComfyUI/input/audio"
 SCENES_JSON   = "/kaggle/working/ComfyUI/input/scenes.json"
 FPS           = 24
+MIN_FRAMES    = 65    # LTX minimum stable length (~2.7s) — crashes below this
+MIN_SECONDS   = 2.8  # Pad audio shorter than this with silence
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -48,12 +51,50 @@ def get_audio_duration(audio_path):
 def calc_frames(duration_seconds, fps=24):
     """
     Calculate valid LTX frame count from audio duration.
-    Formula: frames = ceil(duration × fps) rounded UP to nearest (8n + 1)
+    Formula: rounded UP to nearest (8n + 1).
+    Enforces minimum of 65 frames — LTX crashes below this.
     Valid values: 65, 73, 81, 89, 97, 105, 113, 121, 129, 137, 145, 153, 161, 169...
     """
     raw_frames = duration_seconds * fps
-    n = math.ceil((raw_frames - 1) / 8)
-    return int(n * 8 + 1)
+    n          = math.ceil((raw_frames - 1) / 8)
+    frames     = int(n * 8 + 1)
+
+    # Enforce minimum
+    if frames < MIN_FRAMES:
+        frames = MIN_FRAMES
+
+    return frames
+
+
+def pad_audio_if_short(audio_path, min_seconds=MIN_SECONDS):
+    """
+    If audio is shorter than min_seconds, pad it with silence at the end.
+    Returns (final_path, final_duration).
+    Padded file saved alongside original as *_padded.mp3.
+    Original file is NOT deleted.
+    """
+    duration = get_audio_duration(audio_path)
+
+    if duration >= min_seconds:
+        return audio_path, duration
+
+    pad_time    = min_seconds - duration
+    base, ext   = os.path.splitext(audio_path)
+    padded_path = base + '_padded.mp3'
+
+    result = subprocess.run([
+        'ffmpeg', '-i', audio_path,
+        '-af', f'apad=pad_dur={pad_time:.3f}',
+        '-c:a', 'libmp3lame', '-qscale:a', '2',
+        padded_path, '-y'
+    ], capture_output=True, text=True)
+
+    if result.returncode == 0:
+        return padded_path, get_audio_duration(padded_path)
+    else:
+        # Padding failed — return original, calc_frames will clamp to MIN_FRAMES
+        print(f"    ⚠️  Padding failed, using original: {os.path.basename(audio_path)}")
+        return audio_path, duration
 
 
 def detect_lip_sync(audio_filename):
@@ -62,8 +103,8 @@ def detect_lip_sync(audio_filename):
     'narrator' in name → lip_sync=0 (no mouth movement)
     anything else      → lip_sync=1 (character speaks)
     """
-    stem = os.path.splitext(audio_filename)[0]  # e.g. "7_Grandfather"
-    parts = stem.split('_', 1)
+    stem      = os.path.splitext(audio_filename)[0]
+    parts     = stem.split('_', 1)
     char_part = parts[1] if len(parts) > 1 else stem
 
     if 'narrator' in audio_filename.lower():
@@ -81,10 +122,9 @@ def extract_number(filename):
 def find_image_for_scene(scene_num, image_folder):
     """
     Find image file matching scene number.
-    Looks for files like: scene_01_00001_.png, scene_1_*.png etc.
-    Returns (filename, full_path) or (None, None)
+    Tries: scene_01_00001_.png, scene_01.png, *scene*01*.png etc.
+    Returns (filename, full_path) or (None, None).
     """
-    # Try common patterns
     patterns = [
         f"scene_{scene_num:02d}_*.png",
         f"scene_{scene_num}_*.png",
@@ -96,7 +136,6 @@ def find_image_for_scene(scene_num, image_folder):
     for pattern in patterns:
         matches = glob.glob(os.path.join(image_folder, pattern))
         if matches:
-            # Pick first match, prefer _00001_ pattern
             matches.sort()
             return os.path.basename(matches[0]), matches[0]
     return None, None
@@ -118,13 +157,15 @@ all_audio = []
 for ext in audio_extensions:
     all_audio.extend(glob.glob(os.path.join(AUDIO_FOLDER, ext)))
 
-# Extract scene number from each audio file and build map
-audio_map = {}  # scene_num → (filename, full_path)
+# Skip already-padded files
+all_audio = [f for f in all_audio if '_padded' not in os.path.basename(f)]
+
+# Build scene_num → (filename, path) map
+audio_map = {}
 for audio_path in all_audio:
     num = extract_number(audio_path)
     if num is not None:
-        filename = os.path.basename(audio_path)
-        audio_map[num] = (filename, audio_path)
+        audio_map[num] = (os.path.basename(audio_path), audio_path)
 
 if not audio_map:
     print("❌ No audio files found in:", AUDIO_FOLDER)
@@ -141,26 +182,35 @@ print()
 scenes        = []
 total_dur     = 0
 missing_image = []
-missing_audio = []
 
 for scene_num in sorted(audio_map.keys()):
     audio_file, audio_path = audio_map[scene_num]
 
     # Find matching image
     image_file, image_path = find_image_for_scene(scene_num, IMAGE_FOLDER)
-
     if image_file is None:
         missing_image.append(f"scene_{scene_num:02d}_*.png")
-        image_file = f"scene_{scene_num:02d}_00001_.png"  # fallback name
+        image_file = f"scene_{scene_num:02d}_00001_.png"  # fallback
 
-    # Get duration and calculate frames
-    duration = get_audio_duration(audio_path)
-    frames   = calc_frames(duration)
-    total_dur += duration
+    # Get raw duration
+    raw_duration = get_audio_duration(audio_path)
+
+    # Pad if too short
+    if raw_duration < MIN_SECONDS:
+        print(f"  ⚠️  Scene {scene_num}: {raw_duration:.2f}s is too short "
+              f"(min {MIN_SECONDS}s) → padding with silence")
+        audio_path, duration = pad_audio_if_short(audio_path)
+        audio_file = os.path.basename(audio_path)
+        print(f"       Padded to {duration:.2f}s → {audio_file}")
+    else:
+        duration = raw_duration
+
+    # Calculate frames (also enforces MIN_FRAMES internally)
+    frames     = calc_frames(duration)
+    total_dur += raw_duration  # use raw for time estimate
 
     # Detect lip sync
     lip_sync, character = detect_lip_sync(audio_file)
-
     output_name = f"scene_{scene_num:02d}"
 
     scenes.append({
@@ -176,7 +226,7 @@ for scene_num in sorted(audio_map.keys()):
     img_status = "✅" if image_path else "⚠️ "
     lip_str    = f"💬 {character}" if lip_sync else "🔇 narrator"
     print(f"Scene {scene_num:02d}: {audio_file}")
-    print(f"  Audio:  {duration:.2f}s → {frames} frames | {lip_str}")
+    print(f"  Audio:  {raw_duration:.2f}s → {frames} frames | {lip_str}")
     print(f"  Image:  {img_status} {image_file}")
 
 # ── WRITE scenes.json ─────────────────────────────────────────────────────────
@@ -200,9 +250,9 @@ if missing_image:
 
 print()
 print("Scene summary:")
-print(f"  {'ID':<5} {'Output':<12} {'Frames':<8} {'Dur':<8} {'Audio':<25} {'Type'}")
-print(f"  {'-'*65}")
+print(f"  {'ID':<5} {'Output':<12} {'Frames':<8} {'Dur':<8} {'Audio':<30} {'Type'}")
+print(f"  {'-'*70}")
 for s in scenes:
     t   = f"💬 {s['character']}" if s['lip_sync'] else "🔇 narrator"
     dur = round(s['frames'] / FPS, 1)
-    print(f"  {s['id']:<5} {s['output']:<12} {s['frames']:<8} {dur}s{'':<4} {s['audio']:<25} {t}")
+    print(f"  {s['id']:<5} {s['output']:<12} {s['frames']:<8} {dur}s{'':<4} {s['audio']:<30} {t}")
