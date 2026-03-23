@@ -53,8 +53,8 @@ def calc_frames(duration_seconds, fps=24):
     Example: 2.4s -> 3x24+1 = 73 frames
     Example: 7.0s -> 7x24+1 = 169 frames
     """
-    return math.ceil(duration_seconds) * fps + 1
-
+    # return math.ceil(duration_seconds) * fps + 1
+    return math.ceil(duration_seconds)
 
 
 def detect_lip_sync(audio_filename):
