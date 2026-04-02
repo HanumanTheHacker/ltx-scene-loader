@@ -46,7 +46,7 @@ class LTXSceneLoader:
     CATEGORY      = "LTX/Batch"
     OUTPUT_NODE   = False
 
-    def load_scene(self, scenes_json_path, image_folder, audio_folder, scene_index):
+    def load_scene(self, scenes_json_path, image_folder, audio_folder, scene_index, id):
 
         if not os.path.exists(scenes_json_path):
             raise FileNotFoundError(
