@@ -29,13 +29,13 @@ class LTXSceneLoader:
             }
         }
 
-    RETURN_TYPES  = ("STRING", "STRING", "INT", "INT", "INT")
-    RETURN_NAMES  = ("image_path", "audio_path", "frames", "lip_sync", "total_scenes")
+    RETURN_TYPES  = ("STRING", "STRING", "INT", "INT", "INT", "INT")
+    RETURN_NAMES  = ("image_path", "audio_path", "frames", "lip_sync", "total_scenes", "id")
     FUNCTION      = "load_scene"
     CATEGORY      = "LTX/Batch"
     OUTPUT_NODE   = False
 
-    def load_scene(self, scenes_json_path, image_folder, audio_folder, scene_index):
+    def load_scene(self, scenes_json_path, image_folder, audio_folder, scene_index, id):
 
         if not os.path.exists(scenes_json_path):
             raise FileNotFoundError(
@@ -62,6 +62,7 @@ class LTXSceneLoader:
         audio_path = audio_folder.rstrip('/') + '/' + scene['audio']
         frames     = int(scene.get('frames',   169))
         lip_sync   = int(scene.get('lip_sync',   0))
+        id         = int(scene.get('id' , 0))
         character  = scene.get('character', 'narrator')
         lip_str    = f"💬 {character} speaks" if lip_sync else "🔇 narrator"
 
@@ -71,7 +72,7 @@ class LTXSceneLoader:
         print(f"  Frames:   {frames}")
         print(f"  Lip sync: {lip_str}")
 
-        return (image_path, audio_path, frames, lip_sync, total_scenes)
+        return (image_path, audio_path, frames, lip_sync, total_scenes, id)
 
 
 NODE_CLASS_MAPPINGS = {
