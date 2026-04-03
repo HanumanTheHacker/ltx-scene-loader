@@ -62,7 +62,7 @@ class LTXSceneLoader:
         audio_path = audio_folder.rstrip('/') + '/' + scene['audio']
         frames     = int(scene.get('frames',   169))
         lip_sync   = int(scene.get('lip_sync',   0))
-        id         = int(scene.get('id' , 0))
+        id         = int(scene.get('id' , 0)) - 1
         character  = scene.get('character', 'narrator')
         lip_str    = f"💬 {character} speaks" if lip_sync else "🔇 narrator"
 
