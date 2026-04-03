@@ -75,7 +75,7 @@ class LTXSceneLoader:
         lip_sync   = int(scene.get('lip_sync',   0))
         character  = scene.get('character', 'narrator')
         lip_str    = f"💬 {character} speaks" if lip_sync else "🔇 narrator"
-        id         = int(scene.get('id',   0))
+        id         = int(scene.get('id',   0)) - 1
 
         print(f"\\n[LTXSceneLoader] Scene {idx}/{total_scenes}")
         print(f"  Image:    {image_path}")
