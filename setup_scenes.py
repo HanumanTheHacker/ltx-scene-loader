@@ -79,26 +79,26 @@ def extract_number(filename):
     return int(match.group(1)) if match else None
 
 
-def find_image_for_scene(scene_num, image_folder):
-    """
-    Find image file matching scene number.
-    Tries: scene_01_00001_.png, scene_01.png, *scene*01*.png etc.
-    Returns (filename, full_path) or (None, None).
-    """
-    patterns = [
-        f"scene_{scene_num:02d}_*.png",
-        f"scene_{scene_num}_*.png",
-        f"scene_{scene_num:02d}.png",
-        f"scene_{scene_num}.png",
-        f"*scene*{scene_num:02d}*.png",
-        f"*scene*{scene_num}*.png",
-    ]
-    for pattern in patterns:
-        matches = glob.glob(os.path.join(image_folder, pattern))
-        if matches:
-            matches.sort()
-            return os.path.basename(matches[0]), matches[0]
-    return None, None
+# def find_image_for_scene(scene_num, image_folder):
+#     """
+#     Find image file matching scene number.
+#     Tries: scene_01_00001_.png, scene_01.png, *scene*01*.png etc.
+#     Returns (filename, full_path) or (None, None).
+#     """
+#     patterns = [
+#         f"scene_{scene_num:02d}_*.png",
+#         f"scene_{scene_num}_*.png",
+#         f"scene_{scene_num:02d}.png",
+#         f"scene_{scene_num}.png",
+#         f"*scene*{scene_num:02d}*.png",
+#         f"*scene*{scene_num}*.png",
+#     ]
+#     for pattern in patterns:
+#         matches = glob.glob(os.path.join(image_folder, pattern))
+#         if matches:
+#             matches.sort()
+#             return os.path.basename(matches[0]), matches[0]
+#     return None, None
 
 
 # ── AUTO-DETECT AUDIO FILES ───────────────────────────────────────────────────
@@ -116,6 +116,34 @@ audio_extensions = ['*.mp3', '*.wav', '*.flac', '*.aac', '*.ogg']
 all_audio = []
 for ext in audio_extensions:
     all_audio.extend(glob.glob(os.path.join(AUDIO_FOLDER, ext)))
+
+# ── FIND ALL AVAILABLE IMAGES ─────────────────────────────────────────────────
+
+# Find all scene images and extract their numbers
+image_files = glob.glob(os.path.join(IMAGE_FOLDER, "scene_*.png"))
+image_map_by_num = {}
+
+for img_path in image_files:
+    img_name = os.path.basename(img_path)
+    # Try to extract scene number from filename (scene_0001_, scene_14_, etc.)
+    match = re.match(r'^scene_(\d+)', img_name)
+    if match:
+        img_num = int(match.group(1))
+        if img_num not in image_map_by_num:
+            image_map_by_num[img_num] = (img_name, img_path)
+
+# Get sorted list of available image numbers
+sorted_img_nums = sorted(image_map_by_num.keys())
+
+if sorted_img_nums:
+    print(f"✅ Found {len(sorted_img_nums)} image(s) with scene numbers:")
+    for num in sorted_img_nums:
+        print(f"   Scene {num:04d}: {image_map_by_num[num][0]}")
+    print()
+else:
+    print("❌ No scene images found in:", IMAGE_FOLDER)
+    print()
+
 
 # Skip already-padded files
 all_audio = [f for f in all_audio if '_padded' not in os.path.basename(f)]
@@ -137,23 +165,29 @@ else:
 
 print()
 
-# ── BUILD SCENES ──────────────────────────────────────────────────────────────
+# ── BUILD SCENES (SERIAL MAPPING) ─────────────────────────────────────────────
 
 scenes        = []
 total_dur     = 0
 missing_image = []
 
-for scene_num in sorted(audio_map.keys()):
+# Map audio files serially to available images
+for idx, scene_num in enumerate(sorted(audio_map.keys())):
     audio_file, audio_path = audio_map[scene_num]
 
-    # Find matching image
-    image_file, image_path = find_image_for_scene(scene_num, IMAGE_FOLDER)
-    if image_file is None:
-        missing_image.append(f"scene_{scene_num:02d}_*.png")
-        image_file = f"scene_{scene_num:02d}_00001_.png"  # fallback
+    # Map to the idx-th available image (serial mapping)
+    if idx < len(sorted_img_nums):
+        actual_img_num = sorted_img_nums[idx]
+        image_file, image_path = image_map_by_num[actual_img_num]
+        img_status = "✅"
+    else:
+        # More audio files than images
+        image_file = f"scene_{scene_num:02d}_00001_.png"
+        image_path = None
+        img_status = "⚠️ "
+        missing_image.append(image_file)
 
     # Get raw duration
-
     duration = get_audio_duration(audio_path)
 
     # Calculate frames
@@ -174,11 +208,11 @@ for scene_num in sorted(audio_map.keys()):
         "character": character
     })
 
-    img_status = "✅" if image_path else "⚠️ "
-    lip_str    = f"💬 {character}" if lip_sync else "🔇 narrator"
+    lip_str = f"💬 {character}" if lip_sync else "🔇 narrator"
     print(f"Scene {scene_num:02d}: {audio_file}")
     print(f"  Audio:  {duration:.2f}s → {frames} frames | {lip_str}")
     print(f"  Image:  {img_status} {image_file}")
+
 
 # ── WRITE scenes.json ─────────────────────────────────────────────────────────
 
